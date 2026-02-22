@@ -51,6 +51,37 @@ trap cleanup EXIT
 
 RESEARCH_FILE="${WORK_DIR}/PR_RESEARCH.md"
 DRAFT_FILE="${WORK_DIR}/PR_CODE_REVIEW_DRAFT.md"
+LOG_FILE="${WORK_DIR}/claude.log"
+
+# run_claude PROMPT [STDOUT_FILE]
+#   Runs claude -p, tees stdout to LOG_FILE (and optional STDOUT_FILE),
+#   captures stderr, and reports diagnostics on failure.
+run_claude() {
+  local prompt="$1"
+  local stdout_file="${2:-}"
+  local exit_code=0
+  local stderr_file="${WORK_DIR}/claude-stderr.tmp"
+
+  if [ -n "$stdout_file" ]; then
+    $CLAUDE_CMD -p "$prompt" --model "$CLAUDE_MODEL" --dangerously-skip-permissions \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
+  else
+    $CLAUDE_CMD -p "$prompt" --model "$CLAUDE_MODEL" --dangerously-skip-permissions \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
+  fi
+
+  if [ -s "$stderr_file" ]; then
+    echo "" >> "$LOG_FILE"
+    echo "── stderr ──" >> "$LOG_FILE"
+    cat "$stderr_file" >> "$LOG_FILE"
+    echo "  Claude stderr:" >&2
+    cat "$stderr_file" >&2
+  fi
+  rm -f "$stderr_file"
+
+  return "$exit_code"
+}
+
 echo "── Code Review Pipeline ───────────────────────────────────"
 echo "  Repo root      : ${REPO_ROOT}"
 echo "  Current branch : ${CURRENT_BRANCH}"
@@ -58,6 +89,7 @@ echo "  Base branch    : ${BASE_BRANCH}"
 echo "  Claude cmd     : ${CLAUDE_CMD}"
 echo "  Model          : ${CLAUDE_MODEL}"
 echo "  Working dir    : ${WORK_DIR}"
+echo "  Log file       : ${LOG_FILE}"
 echo "──────────────────────────────────────────────────────────"
 echo ""
 
@@ -121,13 +153,16 @@ PROMPT_EOF
 PROMPT_RESEARCH="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
-if ! $CLAUDE_CMD -p "$PROMPT_RESEARCH" --model "$CLAUDE_MODEL" --dangerously-skip-permissions < /dev/null; then
+if ! run_claude "$PROMPT_RESEARCH"; then
   echo "ERROR: Step 1 failed — claude exited with a non-zero status." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 
 if [ ! -f "$RESEARCH_FILE" ]; then
   echo "ERROR: Step 1 failed — ${RESEARCH_FILE} was not created." >&2
+  echo "  Claude ran but did not write the expected file." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 echo ""
@@ -212,13 +247,16 @@ PROMPT_EOF
 PROMPT_DRAFT="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
-if ! $CLAUDE_CMD -p "$PROMPT_DRAFT" --model "$CLAUDE_MODEL" --dangerously-skip-permissions < /dev/null; then
+if ! run_claude "$PROMPT_DRAFT"; then
   echo "ERROR: Step 2 failed — claude exited with a non-zero status." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 
 if [ ! -f "$DRAFT_FILE" ]; then
   echo "ERROR: Step 2 failed — ${DRAFT_FILE} was not created." >&2
+  echo "  Claude ran but did not write the expected file." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 echo ""
@@ -288,8 +326,15 @@ PROMPT_FINAL="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
 REVIEW_OUTPUT="${WORK_DIR}/PR_CODE_REVIEW.md"
-if ! $CLAUDE_CMD -p "$PROMPT_FINAL" --model "$CLAUDE_MODEL" --dangerously-skip-permissions < /dev/null > "$REVIEW_OUTPUT"; then
+if ! run_claude "$PROMPT_FINAL" "$REVIEW_OUTPUT"; then
   echo "ERROR: Step 3 failed — claude exited with a non-zero status." >&2
+  echo "  See log: ${LOG_FILE}" >&2
+  exit 1
+fi
+
+if [ ! -s "$REVIEW_OUTPUT" ]; then
+  echo "ERROR: Step 3 failed — ${REVIEW_OUTPUT} is empty." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 echo ""
