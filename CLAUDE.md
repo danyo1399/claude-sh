@@ -61,14 +61,47 @@ Print a summary banner before any work begins:
 
 ### Claude Invocation
 
-Each pipeline step invokes Claude as a separate `claude -p` call with `--dangerously-skip-permissions` and `< /dev/null`:
+Use a `run_claude` helper to invoke Claude. It handles logging, stderr capture, and diagnostics:
 
 ```bash
-$CLAUDE_CMD -p "$PROMPT" --model "$CLAUDE_MODEL" --dangerously-skip-permissions < /dev/null
+LOG_FILE="${WORK_DIR}/claude.log"
+
+# run_claude PROMPT [STDOUT_FILE]
+#   Runs claude -p, tees stdout to LOG_FILE (and optional STDOUT_FILE),
+#   captures stderr, and reports diagnostics on failure.
+run_claude() {
+  local prompt="$1"
+  local stdout_file="${2:-}"
+  local exit_code=0
+  local stderr_file="${WORK_DIR}/claude-stderr.tmp"
+
+  if [ -n "$stdout_file" ]; then
+    $CLAUDE_CMD -p "$prompt" --model "$CLAUDE_MODEL" --dangerously-skip-permissions \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
+  else
+    $CLAUDE_CMD -p "$prompt" --model "$CLAUDE_MODEL" --dangerously-skip-permissions \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
+  fi
+
+  if [ -s "$stderr_file" ]; then
+    echo "" >> "$LOG_FILE"
+    echo "── stderr ──" >> "$LOG_FILE"
+    cat "$stderr_file" >> "$LOG_FILE"
+    echo "  Claude stderr:" >&2
+    cat "$stderr_file" >&2
+  fi
+  rm -f "$stderr_file"
+
+  return "$exit_code"
+}
 ```
 
 - Each step is a fresh Claude session (no conversation state shared between steps)
 - Steps pass context to each other via intermediate files in `$WORK_DIR`
+- All Claude stdout is appended to `$LOG_FILE` for post-mortem inspection
+- Stderr is captured separately and printed inline if non-empty
+- Pass a second argument to redirect Claude's stdout to a file (used when the deliverable is stdout rather than a written file)
+- Include the log file path in the pipeline banner
 
 ### Prompt Structure
 
@@ -108,20 +141,23 @@ Print step headers so the user can follow progress:
 
 ### Error Handling
 
-After each Claude invocation:
+After each `run_claude` invocation:
 
 1. Check the exit code
-2. Verify expected output files were created
-3. Print `ERROR:` to stderr and `exit 1` on failure
+2. Verify expected output files were created (or non-empty for stdout captures)
+3. Print `ERROR:` to stderr, point to the log file, and `exit 1`
 
 ```bash
-if ! $CLAUDE_CMD -p "$PROMPT" ...; then
+if ! run_claude "$PROMPT"; then
   echo "ERROR: Step N failed — claude exited with a non-zero status." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 
 if [ ! -f "$EXPECTED_FILE" ]; then
   echo "ERROR: Step N failed — ${EXPECTED_FILE} was not created." >&2
+  echo "  Claude ran but did not write the expected file." >&2
+  echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 ```

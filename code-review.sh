@@ -3,10 +3,9 @@ set -euo pipefail
 
 # -------------------------------------------------------------------
 # code-review.sh
-# Three-step AI code review pipeline:
-#   1. Research — deep codebase analysis → PR_RESEARCH.md
-#   2. Draft   — code review draft      → PR_CODE_REVIEW_DRAFT.md
-#   3. Audit   — validate & finalise    → stdout
+# Two-step AI code review pipeline:
+#   1. Draft   — code review draft      → PR_CODE_REVIEW_DRAFT.md
+#   2. Audit   — validate & finalise    → stdout
 # -------------------------------------------------------------------
 
 # ── Defaults & configuration ──────────────────────────────────────
@@ -49,7 +48,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-RESEARCH_FILE="${WORK_DIR}/PR_RESEARCH.md"
 DRAFT_FILE="${WORK_DIR}/PR_CODE_REVIEW_DRAFT.md"
 LOG_FILE="${WORK_DIR}/claude.log"
 
@@ -94,107 +92,49 @@ echo "────────────────────────�
 echo ""
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 1: Research
+# STEP 1: Draft Code Review
 # ══════════════════════════════════════════════════════════════════
-echo "── Step 1/3: Research ────────────────────────────────────"
+echo "── Step 1/2: Draft Code Review ──────────────────────────"
 echo ""
 
 PROMPT_CONTEXT="CONTEXT:
 - Repository root: ${REPO_ROOT}
 - Current branch: ${CURRENT_BRANCH}
 - Base branch: ${BASE_BRANCH}
-- Research output file: ${RESEARCH_FILE}"
-
-PROMPT_BODY=$(cat <<'PROMPT_EOF'
-
-You are performing a deep code review research task.
-
-INSTRUCTIONS:
-
-Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch listed above. Run git diff, git log, and any other git commands you need to understand the full scope of changes.
-
-Research the codebase IN DEPTH to understand the changes. Read every relevant file in full. Understand the architecture, data flow, and all specificities. Do not skim. Do not stop researching until you have a thorough understanding of every part of the codebase the changes touch. Explore related files across the entire repo.
-
-Your ONLY deliverable is writing the research output file listed above.
-
-Write the following sections:
-
-## Summary
-A concise summary of what this branch does.
-
-## Changed Files
-Every file that has been modified, with brief descriptions of what each does and what changed.
-
-## Commit History
-Summary of commits in this branch.
-
-## Existing Patterns
-How similar features are currently implemented in this codebase (naming conventions, folder structure, component patterns, API patterns).
-
-## Dependencies
-Libraries, utilities, shared code, and services that are relevant to the changes.
-
-## Potential Impact Areas
-What else might break or need updating (tests, types, imports, configs).
-
-## Edge Cases and Constraints
-Anything tricky that the implementation should watch out for.
-
-## Reference Implementations
-If there is a similar feature already built in the codebase, document it as a reference.
-
-## Observations
-Any other noteworthy findings, concerns, or suggestions.
-
-Be thorough. Keep researching until you have complete understanding.
-PROMPT_EOF
-)
-
-PROMPT_RESEARCH="${PROMPT_CONTEXT}
-${PROMPT_BODY}"
-
-if ! run_claude "$PROMPT_RESEARCH"; then
-  echo "ERROR: Step 1 failed — claude exited with a non-zero status." >&2
-  echo "  See log: ${LOG_FILE}" >&2
-  exit 1
-fi
-
-if [ ! -f "$RESEARCH_FILE" ]; then
-  echo "ERROR: Step 1 failed — ${RESEARCH_FILE} was not created." >&2
-  echo "  Claude ran but did not write the expected file." >&2
-  echo "  See log: ${LOG_FILE}" >&2
-  exit 1
-fi
-echo ""
-echo "  Step 1 complete: ${RESEARCH_FILE}"
-echo ""
-
-# ══════════════════════════════════════════════════════════════════
-# STEP 2: Draft Code Review
-# ══════════════════════════════════════════════════════════════════
-echo "── Step 2/3: Draft Code Review ──────────────────────────"
-echo ""
-
-PROMPT_CONTEXT="CONTEXT:
-- Repository root: ${REPO_ROOT}
-- Current branch: ${CURRENT_BRANCH}
-- Base branch: ${BASE_BRANCH}
-- Research file: ${RESEARCH_FILE}
 - Draft output file: ${DRAFT_FILE}"
 
 PROMPT_BODY=$(cat <<'PROMPT_EOF'
 
-You are an expert code reviewer. Your job is to perform a thorough code review.
+You are an expert code reviewer coordinating a thorough, parallelised code review.
 
 INSTRUCTIONS:
 
-Read the PR research notes from the research file listed above. Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. Run git diff, git log, and any other git commands you need.
+Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. Run git diff, git log, and any other git commands you need. Research the codebase in depth to understand the changes — read every relevant file in full, understand the architecture, data flow, and all specificities.
+
+## Review Strategy
+
+Follow these phases in order:
+
+### Phase 1: Analyse & Partition
+Analyse the code changes and identify areas that can be reviewed separately. Group changes into logical review areas based on concern (e.g., by feature, module, layer, or file cluster). Each area should be independently reviewable.
+
+### Phase 2: Parallel Agent Reviews
+For each area identified in Phase 1, use a subagent to perform a focused code review of that area. Each agent should:
+- Receive the relevant file paths and a description of the area it is reviewing
+- Examine the actual code changes in its area using git diff and file reads
+- Apply the review rules and severity classification defined below
+- Return its findings in markdown
+
+Launch all area review agents in parallel for efficiency.
+
+### Phase 3: Collate
+Collate all agent area code reviews into a single, unified code review covering all areas. Deduplicate any overlapping findings. Ensure consistent severity classification across areas.
+
+Your ONLY deliverable is writing the draft output file listed above. The response must be in markdown.
 
 Make NO assumptions — explore the codebase and verify every assumption made in the code changes. ONLY report issues where you have concrete evidence. Do NOT suggest verification tasks for hypothetical scenarios.
 
 Include file names and line numbers where possible.
-
-Your ONLY deliverable is writing the draft output file listed above. The response must be in markdown.
 
 ## Document Structure
 
@@ -248,32 +188,31 @@ PROMPT_DRAFT="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
 if ! run_claude "$PROMPT_DRAFT"; then
-  echo "ERROR: Step 2 failed — claude exited with a non-zero status." >&2
+  echo "ERROR: Step 1 failed — claude exited with a non-zero status." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 
 if [ ! -f "$DRAFT_FILE" ]; then
-  echo "ERROR: Step 2 failed — ${DRAFT_FILE} was not created." >&2
+  echo "ERROR: Step 1 failed — ${DRAFT_FILE} was not created." >&2
   echo "  Claude ran but did not write the expected file." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 echo ""
-echo "  Step 2 complete: ${DRAFT_FILE}"
+echo "  Step 1 complete: ${DRAFT_FILE}"
 echo ""
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 3: Audit & Finalise
+# STEP 2: Audit & Finalise
 # ══════════════════════════════════════════════════════════════════
-echo "── Step 3/3: Audit & Finalise ───────────────────────────"
+echo "── Step 2/2: Audit & Finalise ───────────────────────────"
 echo ""
 
 PROMPT_CONTEXT="CONTEXT:
 - Repository root: ${REPO_ROOT}
 - Current branch: ${CURRENT_BRANCH}
 - Base branch: ${BASE_BRANCH}
-- Research file: ${RESEARCH_FILE}
 - Draft review file: ${DRAFT_FILE}"
 
 PROMPT_BODY=$(cat <<'PROMPT_EOF'
@@ -285,7 +224,7 @@ You are a senior code review auditor. Your job is to:
 
 INSTRUCTIONS:
 
-Read the draft code review from the draft review file listed above. Also read the research file for additional context. Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. For each issue raised in the draft, verify it against the actual codebase. Explore the codebase to confirm or refute each finding.
+Read the draft code review from the draft review file listed above. Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. For each issue raised in the draft, verify it against the actual codebase. Explore the codebase to confirm or refute each finding.
 
 ## Phase 1: Audit Each Issue
 
@@ -327,13 +266,13 @@ ${PROMPT_BODY}"
 
 REVIEW_OUTPUT="${WORK_DIR}/PR_CODE_REVIEW.md"
 if ! run_claude "$PROMPT_FINAL" "$REVIEW_OUTPUT"; then
-  echo "ERROR: Step 3 failed — claude exited with a non-zero status." >&2
+  echo "ERROR: Step 2 failed — claude exited with a non-zero status." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 
 if [ ! -s "$REVIEW_OUTPUT" ]; then
-  echo "ERROR: Step 3 failed — ${REVIEW_OUTPUT} is empty." >&2
+  echo "ERROR: Step 2 failed — ${REVIEW_OUTPUT} is empty." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
@@ -344,7 +283,6 @@ echo ""
 # ══════════════════════════════════════════════════════════════════
 trap - EXIT
 echo "── Code Review Complete ─────────────────────────────────"
-echo "  Research       : ${RESEARCH_FILE}"
 echo "  Draft review   : ${DRAFT_FILE}"
 echo "────────────────────────────────────────────────────────"
 echo ""
