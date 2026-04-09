@@ -22,6 +22,7 @@ Arguments:
 Options:
   -h, --help           Show this help message and exit
   --model MODEL        Claude model to use (default: claude-opus-4-6)
+  --claude-cmd CMD     Path to claude binary (default: claude)
   --staged             Review only staged (indexed) changes
   --unstaged           Review only unstaged working-tree changes
   --pending            Review all uncommitted changes (staged + unstaged)
@@ -54,6 +55,10 @@ while [ $# -gt 0 ]; do
       ;;
     --model)
       CLAUDE_MODEL="$2"
+      shift 2
+      ;;
+    --claude-cmd)
+      CLAUDE_CMD="$2"
       shift 2
       ;;
     --staged)

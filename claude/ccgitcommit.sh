@@ -19,6 +19,7 @@ Usage: ccgitcommit.sh [OPTIONS]
 Options:
   -h, --help             Show this help message and exit
   --model MODEL          Claude model to use (default: claude-sonnet-4-20250514)
+  --claude-cmd CMD       Path to claude binary (default: claude)
   --staged               Commit staged changes only (default)
   --all                  Stage and commit all pending changes
   --smart                AI groups changes into logical commits
@@ -55,6 +56,10 @@ while [ $# -gt 0 ]; do
       ;;
     --model)
       CLAUDE_MODEL="$2"
+      shift 2
+      ;;
+    --claude-cmd)
+      CLAUDE_CMD="$2"
       shift 2
       ;;
     --staged)

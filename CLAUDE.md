@@ -43,9 +43,10 @@ Usage: script-name [OPTIONS] [ARGS]
 Options:
   -h, --help           Show this help message and exit
   --model MODEL        Claude model to use (default: claude-opus-4-6)
+  --claude-cmd CMD     Path to claude binary (default: claude)
 
 Environment variables:
-  CLAUDE_CMD           Path to claude binary (default: claude)
+  CLAUDE_CMD           Path to claude binary (default: claude); --claude-cmd takes precedence
   CLAUDE_MODEL         Model override (default: claude-opus-4-6)
   KEEP_WORK_DIR        Set to 1 to preserve temp files on failure
 
@@ -63,6 +64,7 @@ Parse `-h`/`--help` early in the `while/case` option loop and call `usage; exit 
 - `CLAUDE_CMD="${CLAUDE_CMD:-claude}"` — allow overriding the claude binary
 - `CLAUDE_MODEL="${CLAUDE_MODEL:-<default>}"` — allow overriding the model via env var
 - Support `--model` flag for CLI override where appropriate
+- Support `--claude-cmd` flag for CLI override of the claude binary
 - Parse CLI options with a `while/case` loop
 
 ### Git Repository Validation
