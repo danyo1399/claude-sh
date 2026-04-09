@@ -2,6 +2,15 @@
 
 A collection of bash scripts that use the Claude CLI (`claude -p`) to perform multi-step AI pipelines against git repositories.
 
+## File Naming Conventions
+
+- Claude scripts are prefixed with `cc` (e.g., `cccodereview.sh`)
+- Open code scripts are prefixed with `oc` (e.g., `ocexample.sh`)
+
+## Directory Structure
+
+Each script category folder (e.g., `claude/`) contains a `draft/` subfolder for scripts that are not yet ready for production use. Draft scripts are excluded from installation.
+
 ## Script Standards
 
 All scripts in this project MUST follow the patterns established in `code-review.sh`. The conventions below are mandatory.
@@ -11,6 +20,43 @@ All scripts in this project MUST follow the patterns established in `code-review
 - Shebang: `#!/usr/bin/env bash`
 - Always `set -euo pipefail`
 - Header comment block describing the script name, what it does (numbered pipeline steps), and usage/options
+
+### Help / Usage
+
+Every script MUST provide a `usage()` function printed on `-h` or `--help`. The help text must include:
+
+- **Description** — what the script does (1–2 sentences)
+- **Usage** — `Usage: script-name [OPTIONS] [ARGS]`
+- **Options** — every flag/env-var the script accepts, with defaults noted
+- **Environment variables** — any env vars that influence behaviour (e.g. `CLAUDE_CMD`, `CLAUDE_MODEL`, `KEEP_WORK_DIR`)
+- **Examples** — at least two realistic invocation examples
+
+The `--help` check must come before any validation (git checks, argument parsing) so help works outside a repo.
+
+```bash
+usage() {
+  cat <<EOF
+Description of the script.
+
+Usage: script-name [OPTIONS] [ARGS]
+
+Options:
+  -h, --help           Show this help message and exit
+  --model MODEL        Claude model to use (default: claude-opus-4-6)
+
+Environment variables:
+  CLAUDE_CMD           Path to claude binary (default: claude)
+  CLAUDE_MODEL         Model override (default: claude-opus-4-6)
+  KEEP_WORK_DIR        Set to 1 to preserve temp files on failure
+
+Examples:
+  script-name
+  script-name --model claude-sonnet-4-20250514 develop
+EOF
+}
+```
+
+Parse `-h`/`--help` early in the `while/case` option loop and call `usage; exit 0`.
 
 ### Configuration
 

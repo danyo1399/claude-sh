@@ -2,26 +2,90 @@
 set -euo pipefail
 
 # -------------------------------------------------------------------
-# code-review.sh
+# cccodereview.sh
 # Two-step AI code review pipeline:
 #   1. Draft   — code review draft      → PR_CODE_REVIEW_DRAFT.md
 #   2. Audit   — validate & finalise    → stdout
 # -------------------------------------------------------------------
 
-# ── Defaults & configuration ──────────────────────────────────────
-BASE_BRANCH="${1:-main}"
+usage() {
+  cat <<EOF
+Two-step AI code review pipeline that drafts a review of your branch
+changes and then audits the draft to produce a validated final review.
+
+Usage: cccodereview.sh [OPTIONS] [BASE_BRANCH]
+
+Arguments:
+  BASE_BRANCH          Branch to diff against (default: main).
+                       Ignored when --staged, --unstaged, or --pending is used.
+
+Options:
+  -h, --help           Show this help message and exit
+  --model MODEL        Claude model to use (default: claude-opus-4-6)
+  --staged             Review only staged (indexed) changes
+  --unstaged           Review only unstaged working-tree changes
+  --pending            Review all uncommitted changes (staged + unstaged)
+
+Environment variables:
+  CLAUDE_CMD           Path to claude binary (default: claude)
+  CLAUDE_MODEL         Model override; --model flag takes precedence
+  KEEP_WORK_DIR        Set to 1 to preserve temp files on failure
+
+Examples:
+  cccodereview.sh                        # review branch vs main
+  cccodereview.sh develop                # review branch vs develop
+  cccodereview.sh --staged               # review staged changes only
+  cccodereview.sh --pending              # review all uncommitted changes
+  cccodereview.sh --model claude-sonnet-4-20250514 feature/main
+EOF
+}
+
+# ── Parse options ────────────────────────────────────────────────
 CLAUDE_CMD="${CLAUDE_CMD:-claude}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-opus-4-6}"
+BASE_BRANCH=""
+REVIEW_MODE="branch"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --model)
+      CLAUDE_MODEL="$2"
+      shift 2
+      ;;
+    --staged)
+      REVIEW_MODE="staged"
+      shift
+      ;;
+    --unstaged)
+      REVIEW_MODE="unstaged"
+      shift
+      ;;
+    --pending)
+      REVIEW_MODE="pending"
+      shift
+      ;;
+    -*)
+      echo "ERROR: unknown option '$1'" >&2
+      echo "  Run 'cccodereview.sh --help' for usage." >&2
+      exit 1
+      ;;
+    *)
+      BASE_BRANCH="$1"
+      shift
+      ;;
+  esac
+done
+
+BASE_BRANCH="${BASE_BRANCH:-main}"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: must be run inside a git repository." >&2
   exit 1
 }
-
-if ! git rev-parse --verify "${BASE_BRANCH}" >/dev/null 2>&1; then
-  echo "ERROR: base branch '${BASE_BRANCH}' does not exist." >&2
-  exit 1
-fi
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || {
   echo "ERROR: no commits on current branch. Cannot run code review." >&2
@@ -32,6 +96,42 @@ if [ "$CURRENT_BRANCH" = "HEAD" ]; then
   CURRENT_BRANCH="detached at $(git rev-parse --short HEAD)"
   echo "WARNING: detached HEAD state. Using: ${CURRENT_BRANCH}" >&2
 fi
+
+# ── Review mode setup ────────────────────────────────────────────
+case "$REVIEW_MODE" in
+  branch)
+    if ! git rev-parse --verify "${BASE_BRANCH}" >/dev/null 2>&1; then
+      echo "ERROR: base branch '${BASE_BRANCH}' does not exist." >&2
+      exit 1
+    fi
+    REVIEW_LABEL="branch vs ${BASE_BRANCH}"
+    GIT_DIFF_INSTRUCTION="Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. Run git diff ${BASE_BRANCH}...HEAD, git log, and any other git commands you need."
+    ;;
+  staged)
+    if git diff --cached --quiet; then
+      echo "ERROR: no staged changes to review." >&2
+      exit 1
+    fi
+    REVIEW_LABEL="staged changes"
+    GIT_DIFF_INSTRUCTION="Use git to examine only the staged (indexed) changes. Run git diff --cached to see the changes. Do NOT review unstaged or committed branch changes."
+    ;;
+  unstaged)
+    if git diff --quiet; then
+      echo "ERROR: no unstaged changes to review." >&2
+      exit 1
+    fi
+    REVIEW_LABEL="unstaged changes"
+    GIT_DIFF_INSTRUCTION="Use git to examine only the unstaged working-tree changes. Run git diff to see the changes. Do NOT review staged or committed branch changes."
+    ;;
+  pending)
+    if git diff --cached --quiet && git diff --quiet; then
+      echo "ERROR: no uncommitted changes to review." >&2
+      exit 1
+    fi
+    REVIEW_LABEL="pending changes (staged + unstaged)"
+    GIT_DIFF_INSTRUCTION="Use git to examine all uncommitted changes (both staged and unstaged). Run git diff HEAD to see the combined changes. Do NOT review committed branch changes."
+    ;;
+esac
 
 # Unique working directory outside the repo
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
@@ -83,7 +183,7 @@ run_claude() {
 echo "── Code Review Pipeline ───────────────────────────────────"
 echo "  Repo root      : ${REPO_ROOT}"
 echo "  Current branch : ${CURRENT_BRANCH}"
-echo "  Base branch    : ${BASE_BRANCH}"
+echo "  Review scope   : ${REVIEW_LABEL}"
 echo "  Claude cmd     : ${CLAUDE_CMD}"
 echo "  Model          : ${CLAUDE_MODEL}"
 echo "  Working dir    : ${WORK_DIR}"
@@ -100,7 +200,8 @@ echo ""
 PROMPT_CONTEXT="CONTEXT:
 - Repository root: ${REPO_ROOT}
 - Current branch: ${CURRENT_BRANCH}
-- Base branch: ${BASE_BRANCH}
+- Review scope: ${REVIEW_LABEL}
+- Git diff instruction: ${GIT_DIFF_INSTRUCTION}
 - Draft output file: ${DRAFT_FILE}"
 
 PROMPT_BODY=$(cat <<'PROMPT_EOF'
@@ -109,7 +210,7 @@ You are an expert code reviewer coordinating a thorough, parallelised code revie
 
 INSTRUCTIONS:
 
-Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. Run git diff, git log, and any other git commands you need. Research the codebase in depth to understand the changes — read every relevant file in full, understand the architecture, data flow, and all specificities.
+Follow the git diff instruction in the CONTEXT above to obtain the changes to review. Also run any other git commands you need. Research the codebase in depth to understand the changes — read every relevant file in full, understand the architecture, data flow, and all specificities.
 
 ## Review Strategy
 
@@ -212,7 +313,8 @@ echo ""
 PROMPT_CONTEXT="CONTEXT:
 - Repository root: ${REPO_ROOT}
 - Current branch: ${CURRENT_BRANCH}
-- Base branch: ${BASE_BRANCH}
+- Review scope: ${REVIEW_LABEL}
+- Git diff instruction: ${GIT_DIFF_INSTRUCTION}
 - Draft review file: ${DRAFT_FILE}"
 
 PROMPT_BODY=$(cat <<'PROMPT_EOF'
@@ -224,7 +326,7 @@ You are a senior code review auditor. Your job is to:
 
 INSTRUCTIONS:
 
-Read the draft code review from the draft review file listed above. Use git to examine all changes in this branch (committed, staged, and unstaged) compared to the base branch. For each issue raised in the draft, verify it against the actual codebase. Explore the codebase to confirm or refute each finding.
+Read the draft code review from the draft review file listed above. Follow the git diff instruction in the CONTEXT above to obtain the changes under review. For each issue raised in the draft, verify it against the actual codebase. Explore the codebase to confirm or refute each finding.
 
 ## Phase 1: Audit Each Issue
 
