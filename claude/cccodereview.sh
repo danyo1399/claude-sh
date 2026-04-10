@@ -138,12 +138,16 @@ case "$REVIEW_MODE" in
     GIT_DIFF_INSTRUCTION="Use git to examine only the unstaged working-tree changes. Run git diff to see the changes. Do NOT review staged or committed branch changes."
     ;;
   pending)
-    if git diff --cached --quiet && git diff --quiet; then
+    HAS_CHANGES=false
+    git diff --cached --quiet 2>/dev/null || HAS_CHANGES=true
+    git diff --quiet 2>/dev/null || HAS_CHANGES=true
+    [ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ] && HAS_CHANGES=true
+    if [ "$HAS_CHANGES" = false ]; then
       echo "ERROR: no uncommitted changes to review." >&2
       exit 1
     fi
-    REVIEW_LABEL="pending changes (staged + unstaged)"
-    GIT_DIFF_INSTRUCTION="Use git to examine all uncommitted changes (both staged and unstaged). Run git diff HEAD to see the combined changes. Do NOT review committed branch changes."
+    REVIEW_LABEL="pending changes (staged + unstaged + untracked)"
+    GIT_DIFF_INSTRUCTION="Use git to examine all uncommitted changes (staged, unstaged, and untracked files). Run git diff HEAD to see staged and unstaged changes. Also run git ls-files --others --exclude-standard to find untracked files, then read their full contents. Do NOT review committed branch changes."
     ;;
 esac
 

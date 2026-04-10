@@ -11,6 +11,17 @@ A collection of bash scripts that use the Claude CLI (`claude -p`) or OpenCode C
 
 Scripts are organised into category folders: `claude/` for `cc` scripts and `opencode/` for `oc` scripts. Each category folder contains a `draft/` subfolder for scripts that are not yet ready for production use. Draft scripts are excluded from installation.
 
+## Script Sync Policy
+
+Claude (`cc`) scripts are the **master**. Every non-draft Claude script MUST have a corresponding OpenCode (`oc`) equivalent in the `opencode/` directory. When creating or modifying a Claude script, always create or update the matching OpenCode script to stay in sync. The OpenCode version should be functionally identical, differing only in:
+
+- Script name prefix (`cc` → `oc`)
+- Binary and variable names (`CLAUDE_CMD` → `OPENCODE_CMD`, `CLAUDE_MODEL` → `OPENCODE_MODEL`, `--claude-cmd` → `--opencode-cmd`)
+- Invocation method (`claude -p` → `opencode run`)
+- Helper function name (`run_claude` → `run_opencode`)
+- Log file name (`claude.log` → `opencode.log`)
+- Banner label (include "OpenCode" where appropriate)
+
 ## Script Standards
 
 All scripts in this project MUST follow the patterns established in `code-review.sh`. The conventions below are mandatory.
