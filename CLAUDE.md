@@ -1,6 +1,6 @@
 # claude-sh
 
-A collection of bash scripts that use the Claude CLI (`claude -p`) to perform multi-step AI pipelines against git repositories.
+A collection of bash scripts that use the Claude CLI (`claude -p`) or OpenCode CLI (`opencode run`) to perform multi-step AI pipelines against git repositories.
 
 ## File Naming Conventions
 
@@ -9,7 +9,7 @@ A collection of bash scripts that use the Claude CLI (`claude -p`) to perform mu
 
 ## Directory Structure
 
-Each script category folder (e.g., `claude/`) contains a `draft/` subfolder for scripts that are not yet ready for production use. Draft scripts are excluded from installation.
+Scripts are organised into category folders: `claude/` for `cc` scripts and `opencode/` for `oc` scripts. Each category folder contains a `draft/` subfolder for scripts that are not yet ready for production use. Draft scripts are excluded from installation.
 
 ## Script Standards
 
@@ -42,12 +42,12 @@ Usage: script-name [OPTIONS] [ARGS]
 
 Options:
   -h, --help           Show this help message and exit
-  --model MODEL        Claude model to use (default: claude-opus-4-6)
+  --model MODEL        Model to use (e.g. claude-opus-4-6)
   --claude-cmd CMD     Path to claude binary (default: claude)
 
 Environment variables:
   CLAUDE_CMD           Path to claude binary (default: claude); --claude-cmd takes precedence
-  CLAUDE_MODEL         Model override (default: claude-opus-4-6)
+  CLAUDE_MODEL         Model override (e.g. claude-opus-4-6); --model flag takes precedence
   KEEP_WORK_DIR        Set to 1 to preserve temp files on failure
 
 Examples:
@@ -59,12 +59,25 @@ EOF
 
 Parse `-h`/`--help` early in the `while/case` option loop and call `usage; exit 0`.
 
+> **Note:** The example above uses Claude (`cc`) variable names. For OpenCode (`oc`) scripts, substitute `--opencode-cmd`, `OPENCODE_CMD`, and `OPENCODE_MODEL` accordingly. See the Configuration section for details.
+
 ### Configuration
 
+Scripts MUST NOT hardcode a default model. The model is either passed via `--model` flag / env var, or the agent harness's default model is used. When no model is specified, omit `--model` from the invocation entirely.
+
+For Claude (`cc`) scripts:
 - `CLAUDE_CMD="${CLAUDE_CMD:-claude}"` — allow overriding the claude binary
-- `CLAUDE_MODEL="${CLAUDE_MODEL:-<default>}"` — allow overriding the model via env var
+- `CLAUDE_MODEL="${CLAUDE_MODEL:-}"` — optional model override via env var
 - Support `--model` flag for CLI override where appropriate
 - Support `--claude-cmd` flag for CLI override of the claude binary
+
+For OpenCode (`oc`) scripts:
+- `OPENCODE_CMD="${OPENCODE_CMD:-opencode}"` — allow overriding the opencode binary
+- `OPENCODE_MODEL="${OPENCODE_MODEL:-}"` — optional model override via env var (provider/model format)
+- Support `--model` flag for CLI override where appropriate
+- Support `--opencode-cmd` flag for CLI override of the opencode binary
+
+Both:
 - Parse CLI options with a `while/case` loop
 
 ### Git Repository Validation
@@ -86,7 +99,8 @@ Intermediate files go in a unique temp directory outside the repo:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-WORK_DIR="${TMPDIR:-/tmp}/<script-name>-${RUN_ID}"
+WORK_DIR="${TMPDIR:-/tmp}"
+WORK_DIR="${WORK_DIR%/}/<script-name>-${RUN_ID}"
 mkdir -p "$WORK_DIR"
 ```
 
@@ -107,7 +121,7 @@ Print a summary banner before any work begins:
 ──────────────────────────────────────────────────────
 ```
 
-### Claude Invocation
+### Claude Invocation (cc scripts)
 
 Use a `run_claude` helper to invoke Claude. It handles logging, stderr capture, and diagnostics:
 
@@ -123,11 +137,16 @@ run_claude() {
   local exit_code=0
   local stderr_file="${WORK_DIR}/claude-stderr.tmp"
 
+  local model_args=()
+  if [ -n "$CLAUDE_MODEL" ]; then
+    model_args=(--model "$CLAUDE_MODEL")
+  fi
+
   if [ -n "$stdout_file" ]; then
-    $CLAUDE_CMD -p "$prompt" --model "$CLAUDE_MODEL" --dangerously-skip-permissions \
+    $CLAUDE_CMD -p "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
       < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
   else
-    $CLAUDE_CMD -p "$prompt" --model "$CLAUDE_MODEL" --dangerously-skip-permissions \
+    $CLAUDE_CMD -p "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
       < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
   fi
 
@@ -150,6 +169,71 @@ run_claude() {
 - Stderr is captured separately and printed inline if non-empty
 - Pass a second argument to redirect Claude's stdout to a file (used when the deliverable is stdout rather than a written file)
 - Include the log file path in the pipeline banner
+
+### OpenCode Invocation (oc scripts)
+
+OpenCode scripts use `opencode run` instead of `claude -p`. Documentation: https://opencode.ai/docs/cli/#run-1
+
+**CLI syntax:** `opencode run [message..] [flags]`
+
+Key flags:
+- `--model, -m` — model in `provider/model` format (e.g., `opencode/claude-opus-4-6`)
+- `--dangerously-skip-permissions` — auto-approve permissions not explicitly denied
+- `--file, -f` — file(s) to attach to message
+- `--format` — `default` (formatted) or `json` (raw JSON events)
+- `--continue, -c` — continue the last session
+- `--session, -s` — session ID to continue
+- `--fork` — fork session when continuing
+- `--share` — share the session
+- `--agent` — agent to use
+- `--title` — title for the session
+- `--attach` — attach to a running opencode server (e.g., `http://localhost:4096`)
+- `--port` — port for the local server
+- `--dir` — directory to run in
+- `--variant` — model variant / reasoning effort (e.g., `high`, `max`, `minimal`)
+- `--thinking` — show thinking blocks
+
+Use a `run_opencode` helper that mirrors `run_claude`:
+
+```bash
+LOG_FILE="${WORK_DIR}/opencode.log"
+
+# run_opencode PROMPT [STDOUT_FILE]
+#   Runs opencode run, tees stdout to LOG_FILE (and optional STDOUT_FILE),
+#   captures stderr, and reports diagnostics on failure.
+run_opencode() {
+  local prompt="$1"
+  local stdout_file="${2:-}"
+  local exit_code=0
+  local stderr_file="${WORK_DIR}/opencode-stderr.tmp"
+
+  local model_args=()
+  if [ -n "$OPENCODE_MODEL" ]; then
+    model_args=(--model "$OPENCODE_MODEL")
+  fi
+
+  if [ -n "$stdout_file" ]; then
+    $OPENCODE_CMD run "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
+  else
+    $OPENCODE_CMD run "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
+  fi
+
+  if [ -s "$stderr_file" ]; then
+    echo "" >> "$LOG_FILE"
+    echo "── stderr ──" >> "$LOG_FILE"
+    cat "$stderr_file" >> "$LOG_FILE"
+    echo "  OpenCode stderr:" >&2
+    cat "$stderr_file" >&2
+  fi
+  rm -f "$stderr_file"
+
+  return "$exit_code"
+}
+```
+
+Refer to the Configuration section above for `oc` script variable and flag conventions.
 
 ### Prompt Structure
 

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # -------------------------------------------------------------------
-# cccodereview.sh
-# AI code review pipeline:
+# occodereview.sh
+# AI code review pipeline (OpenCode):
 #   1. Draft   — code review draft      → PR_CODE_REVIEW_DRAFT.md
 #   2. Audit   — validate & finalise    → stdout
 #   3. Fix     — auto-fix issues (optional, --fix)
@@ -15,7 +15,7 @@ AI code review pipeline that drafts a review of your branch changes,
 audits the draft to produce a validated final review, and optionally
 auto-fixes the issues found.
 
-Usage: cccodereview.sh [OPTIONS] [BASE_BRANCH]
+Usage: occodereview.sh [OPTIONS] [BASE_BRANCH]
 
 Arguments:
   BASE_BRANCH          Branch to diff against (default: main).
@@ -23,31 +23,31 @@ Arguments:
 
 Options:
   -h, --help           Show this help message and exit
-  --model MODEL        Claude model to use (e.g. claude-opus-4-6)
-  --claude-cmd CMD     Path to claude binary (default: claude)
+  --model MODEL        OpenCode model to use (e.g. opencode/claude-opus-4-6)
+  --opencode-cmd CMD   Path to opencode binary (default: opencode)
   --staged             Review only staged (indexed) changes
   --unstaged           Review only unstaged working-tree changes
   --pending            Review all uncommitted changes (staged + unstaged)
   --fix                Auto-fix issues found in the code review (step 3)
 
 Environment variables:
-  CLAUDE_CMD           Path to claude binary (default: claude)
-  CLAUDE_MODEL         Model override (e.g. claude-opus-4-6); --model flag takes precedence
+  OPENCODE_CMD         Path to opencode binary (default: opencode)
+  OPENCODE_MODEL       Model override (e.g. opencode/claude-opus-4-6); --model flag takes precedence
   KEEP_WORK_DIR        Set to 1 to preserve temp files on failure
 
 Examples:
-  cccodereview.sh                        # review branch vs main
-  cccodereview.sh develop                # review branch vs develop
-  cccodereview.sh --staged               # review staged changes only
-  cccodereview.sh --pending              # review all uncommitted changes
-  cccodereview.sh --fix                  # review and auto-fix issues
-  cccodereview.sh --model claude-sonnet-4-20250514 feature/main
+  occodereview.sh                        # review branch vs main
+  occodereview.sh develop                # review branch vs develop
+  occodereview.sh --staged               # review staged changes only
+  occodereview.sh --pending              # review all uncommitted changes
+  occodereview.sh --fix                  # review and auto-fix issues
+  occodereview.sh --model opencode/claude-opus-4-6 feature/main
 EOF
 }
 
 # ── Parse options ────────────────────────────────────────────────
-CLAUDE_CMD="${CLAUDE_CMD:-claude}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-}"
+OPENCODE_CMD="${OPENCODE_CMD:-opencode}"
+OPENCODE_MODEL="${OPENCODE_MODEL:-}"
 BASE_BRANCH=""
 REVIEW_MODE="branch"
 AUTO_FIX=false
@@ -59,11 +59,11 @@ while [ $# -gt 0 ]; do
       exit 0
       ;;
     --model)
-      CLAUDE_MODEL="$2"
+      OPENCODE_MODEL="$2"
       shift 2
       ;;
-    --claude-cmd)
-      CLAUDE_CMD="$2"
+    --opencode-cmd)
+      OPENCODE_CMD="$2"
       shift 2
       ;;
     --staged)
@@ -84,7 +84,7 @@ while [ $# -gt 0 ]; do
       ;;
     -*)
       echo "ERROR: unknown option '$1'" >&2
-      echo "  Run 'cccodereview.sh --help' for usage." >&2
+      echo "  Run 'occodereview.sh --help' for usage." >&2
       exit 1
       ;;
     *)
@@ -149,8 +149,7 @@ esac
 
 # Unique working directory outside the repo
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-WORK_DIR="${TMPDIR:-/tmp}"
-WORK_DIR="${WORK_DIR%/}/code-review-${RUN_ID}"
+WORK_DIR="${TMPDIR%/}/oc-code-review-${RUN_ID}"
 mkdir -p "$WORK_DIR"
 
 # Clean up working directory on failure or interrupt.
@@ -164,27 +163,27 @@ cleanup() {
 trap cleanup EXIT
 
 DRAFT_FILE="${WORK_DIR}/PR_CODE_REVIEW_DRAFT.md"
-LOG_FILE="${WORK_DIR}/claude.log"
+LOG_FILE="${WORK_DIR}/opencode.log"
 
-# run_claude PROMPT [STDOUT_FILE]
-#   Runs claude -p, tees stdout to LOG_FILE (and optional STDOUT_FILE),
+# run_opencode PROMPT [STDOUT_FILE]
+#   Runs opencode run, tees stdout to LOG_FILE (and optional STDOUT_FILE),
 #   captures stderr, and reports diagnostics on failure.
-run_claude() {
+run_opencode() {
   local prompt="$1"
   local stdout_file="${2:-}"
   local exit_code=0
-  local stderr_file="${WORK_DIR}/claude-stderr.tmp"
+  local stderr_file="${WORK_DIR}/opencode-stderr.tmp"
 
   local model_args=()
-  if [ -n "$CLAUDE_MODEL" ]; then
-    model_args=(--model "$CLAUDE_MODEL")
+  if [ -n "$OPENCODE_MODEL" ]; then
+    model_args=(--model "$OPENCODE_MODEL")
   fi
 
   if [ -n "$stdout_file" ]; then
-    $CLAUDE_CMD -p "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
+    $OPENCODE_CMD run "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
       < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
   else
-    $CLAUDE_CMD -p "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
+    $OPENCODE_CMD run "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
       < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
   fi
 
@@ -192,7 +191,7 @@ run_claude() {
     echo "" >> "$LOG_FILE"
     echo "── stderr ──" >> "$LOG_FILE"
     cat "$stderr_file" >> "$LOG_FILE"
-    echo "  Claude stderr:" >&2
+    echo "  OpenCode stderr:" >&2
     cat "$stderr_file" >&2
   fi
   rm -f "$stderr_file"
@@ -205,13 +204,13 @@ if [ "$AUTO_FIX" = true ]; then
   TOTAL_STEPS=3
 fi
 
-echo "── Code Review Pipeline ───────────────────────────────────"
+echo "── Code Review Pipeline (OpenCode) ──────────────────────"
 echo "  Repo root      : ${REPO_ROOT}"
 echo "  Current branch : ${CURRENT_BRANCH}"
 echo "  Review scope   : ${REVIEW_LABEL}"
 echo "  Auto-fix       : ${AUTO_FIX}"
-echo "  Claude cmd     : ${CLAUDE_CMD}"
-echo "  Model          : ${CLAUDE_MODEL:-<default>}"
+echo "  OpenCode cmd   : ${OPENCODE_CMD}"
+echo "  Model          : ${OPENCODE_MODEL:-<default>}"
 echo "  Working dir    : ${WORK_DIR}"
 echo "  Log file       : ${LOG_FILE}"
 echo "──────────────────────────────────────────────────────────"
@@ -314,15 +313,15 @@ PROMPT_EOF
 PROMPT_DRAFT="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
-if ! run_claude "$PROMPT_DRAFT"; then
-  echo "ERROR: Step 1 failed — claude exited with a non-zero status." >&2
+if ! run_opencode "$PROMPT_DRAFT"; then
+  echo "ERROR: Step 1 failed — opencode exited with a non-zero status." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
 
 if [ ! -f "$DRAFT_FILE" ]; then
   echo "ERROR: Step 1 failed — ${DRAFT_FILE} was not created." >&2
-  echo "  Claude ran but did not write the expected file." >&2
+  echo "  OpenCode ran but did not write the expected file." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
@@ -393,8 +392,8 @@ PROMPT_FINAL="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
 REVIEW_OUTPUT="${WORK_DIR}/PR_CODE_REVIEW.md"
-if ! run_claude "$PROMPT_FINAL" "$REVIEW_OUTPUT"; then
-  echo "ERROR: Step 2 failed — claude exited with a non-zero status." >&2
+if ! run_opencode "$PROMPT_FINAL" "$REVIEW_OUTPUT"; then
+  echo "ERROR: Step 2 failed — opencode exited with a non-zero status." >&2
   echo "  See log: ${LOG_FILE}" >&2
   exit 1
 fi
@@ -444,8 +443,8 @@ PROMPT_EOF
   PROMPT_FIX="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
-  if ! run_claude "$PROMPT_FIX"; then
-    echo "ERROR: Step 3 failed — claude exited with a non-zero status." >&2
+  if ! run_opencode "$PROMPT_FIX"; then
+    echo "ERROR: Step 3 failed — opencode exited with a non-zero status." >&2
     echo "  See log: ${LOG_FILE}" >&2
     exit 1
   fi
@@ -458,11 +457,6 @@ fi
 trap - EXIT
 echo "── Code Review Complete ─────────────────────────────────"
 echo "  Draft review   : ${DRAFT_FILE}"
-echo "  Final review   : ${REVIEW_OUTPUT}"
-if [ "$AUTO_FIX" = true ]; then
-  echo "  Auto-fix       : applied (see log for details)"
-  echo "  Log file       : ${LOG_FILE}"
-fi
 echo "────────────────────────────────────────────────────────"
 echo ""
 if command -v glow >/dev/null 2>&1; then

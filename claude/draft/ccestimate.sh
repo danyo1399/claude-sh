@@ -155,7 +155,8 @@ fi
 
 # ── Working directory ─────────────────────────────────────────────
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-WORK_DIR="${TMPDIR:-/tmp}/estimate-${RUN_ID}"
+WORK_DIR="${TMPDIR:-/tmp}"
+WORK_DIR="${WORK_DIR%/}/estimate-${RUN_ID}"
 mkdir -p "$WORK_DIR"
 
 cleanup() {

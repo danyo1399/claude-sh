@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # -------------------------------------------------------------------
-# ccgitcommit.sh
-# AI-powered git commit pipeline:
+# ocgitcommit.sh
+# AI-powered git commit pipeline (OpenCode):
 #   Staged/All mode — AI generates commit message → script commits
 #   Smart mode      — AI groups changes into logical commits
 # -------------------------------------------------------------------
@@ -14,12 +14,12 @@ AI-powered git commit that analyzes your changes and generates
 meaningful commit messages. Supports single commits or intelligent
 multi-commit grouping.
 
-Usage: ccgitcommit.sh [OPTIONS]
+Usage: ocgitcommit.sh [OPTIONS]
 
 Options:
   -h, --help             Show this help message and exit
-  --model MODEL          Claude model to use (e.g. claude-sonnet-4-20250514)
-  --claude-cmd CMD       Path to claude binary (default: claude)
+  --model MODEL          OpenCode model to use (e.g. opencode/claude-sonnet-4-6)
+  --opencode-cmd CMD     Path to opencode binary (default: opencode)
   --staged               Commit staged changes only (default)
   --all                  Stage and commit all pending changes
   --smart                AI groups changes into logical commits
@@ -27,23 +27,23 @@ Options:
   --context "TEXT"       Additional context for commit message generation
 
 Environment variables:
-  CLAUDE_CMD             Path to claude binary (default: claude)
-  CLAUDE_MODEL           Model override (e.g. claude-sonnet-4-20250514); --model flag takes precedence
+  OPENCODE_CMD           Path to opencode binary (default: opencode)
+  OPENCODE_MODEL         Model override (e.g. opencode/claude-sonnet-4-6); --model flag takes precedence
   KEEP_WORK_DIR          Set to 1 to preserve temp files on failure
 
 Examples:
-  ccgitcommit.sh                              # commit staged changes
-  ccgitcommit.sh --all                        # stage and commit everything
-  ccgitcommit.sh --smart                      # AI creates logical commits
-  ccgitcommit.sh --staged --push              # commit staged and push
-  ccgitcommit.sh --all --context "refactored auth module"
-  ccgitcommit.sh --smart --push --context "feature: user dashboard"
+  ocgitcommit.sh                              # commit staged changes
+  ocgitcommit.sh --all                        # stage and commit everything
+  ocgitcommit.sh --smart                      # AI creates logical commits
+  ocgitcommit.sh --staged --push              # commit staged and push
+  ocgitcommit.sh --all --context "refactored auth module"
+  ocgitcommit.sh --smart --push --context "feature: user dashboard"
 EOF
 }
 
 # ── Parse options ────────────────────────────────────────────────
-CLAUDE_CMD="${CLAUDE_CMD:-claude}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-}"
+OPENCODE_CMD="${OPENCODE_CMD:-opencode}"
+OPENCODE_MODEL="${OPENCODE_MODEL:-}"
 COMMIT_MODE="staged"
 PUSH=false
 USER_CONTEXT=""
@@ -55,11 +55,11 @@ while [ $# -gt 0 ]; do
       exit 0
       ;;
     --model)
-      CLAUDE_MODEL="$2"
+      OPENCODE_MODEL="$2"
       shift 2
       ;;
-    --claude-cmd)
-      CLAUDE_CMD="$2"
+    --opencode-cmd)
+      OPENCODE_CMD="$2"
       shift 2
       ;;
     --staged)
@@ -84,12 +84,12 @@ while [ $# -gt 0 ]; do
       ;;
     -*)
       echo "ERROR: unknown option '$1'" >&2
-      echo "  Run 'ccgitcommit.sh --help' for usage." >&2
+      echo "  Run 'ocgitcommit.sh --help' for usage." >&2
       exit 1
       ;;
     *)
       echo "ERROR: unexpected argument '$1'" >&2
-      echo "  Run 'ccgitcommit.sh --help' for usage." >&2
+      echo "  Run 'ocgitcommit.sh --help' for usage." >&2
       exit 1
       ;;
   esac
@@ -138,8 +138,7 @@ esac
 
 # ── Working directory ────────────────────────────────────────────
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-WORK_DIR="${TMPDIR:-/tmp}"
-WORK_DIR="${WORK_DIR%/}/ccgitcommit-${RUN_ID}"
+WORK_DIR="${TMPDIR%/}/ocgitcommit-${RUN_ID}"
 mkdir -p "$WORK_DIR"
 
 cleanup() {
@@ -149,28 +148,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
-LOG_FILE="${WORK_DIR}/claude.log"
+LOG_FILE="${WORK_DIR}/opencode.log"
 COMMIT_MSG_FILE="${WORK_DIR}/commit-message.txt"
 
-# run_claude PROMPT [STDOUT_FILE]
-#   Runs claude -p, tees stdout to LOG_FILE (and optional STDOUT_FILE),
+# run_opencode PROMPT [STDOUT_FILE]
+#   Runs opencode run, tees stdout to LOG_FILE (and optional STDOUT_FILE),
 #   captures stderr, and reports diagnostics on failure.
-run_claude() {
+run_opencode() {
   local prompt="$1"
   local stdout_file="${2:-}"
   local exit_code=0
-  local stderr_file="${WORK_DIR}/claude-stderr.tmp"
+  local stderr_file="${WORK_DIR}/opencode-stderr.tmp"
 
   local model_args=()
-  if [ -n "$CLAUDE_MODEL" ]; then
-    model_args=(--model "$CLAUDE_MODEL")
+  if [ -n "$OPENCODE_MODEL" ]; then
+    model_args=(--model "$OPENCODE_MODEL")
   fi
 
   if [ -n "$stdout_file" ]; then
-    $CLAUDE_CMD -p "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
+    $OPENCODE_CMD run "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
       < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
   else
-    $CLAUDE_CMD -p "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
+    $OPENCODE_CMD run "$prompt" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
       < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
   fi
 
@@ -178,7 +177,7 @@ run_claude() {
     echo "" >> "$LOG_FILE"
     echo "── stderr ──" >> "$LOG_FILE"
     cat "$stderr_file" >> "$LOG_FILE"
-    echo "  Claude stderr:" >&2
+    echo "  OpenCode stderr:" >&2
     cat "$stderr_file" >&2
   fi
   rm -f "$stderr_file"
@@ -188,14 +187,14 @@ run_claude() {
 
 # ── Banner ───────────────────────────────────────────────────────
 CONTEXT_DISPLAY="${USER_CONTEXT:-<none>}"
-echo "── Git Commit Pipeline ────────────────────────────────────"
+echo "── Git Commit Pipeline (OpenCode) ───────────────────────"
 echo "  Repo root      : ${REPO_ROOT}"
 echo "  Current branch : ${CURRENT_BRANCH}"
 echo "  Commit mode    : ${COMMIT_LABEL}"
 echo "  Push           : ${PUSH}"
 echo "  Context        : ${CONTEXT_DISPLAY}"
-echo "  Claude cmd     : ${CLAUDE_CMD}"
-echo "  Model          : ${CLAUDE_MODEL:-<default>}"
+echo "  OpenCode cmd   : ${OPENCODE_CMD}"
+echo "  Model          : ${OPENCODE_MODEL:-<default>}"
 echo "  Working dir    : ${WORK_DIR}"
 echo "  Log file       : ${LOG_FILE}"
 echo "───────────────────────────────────────────────────────────"
@@ -245,7 +244,7 @@ Commit message rules:
 - Common types: feat, fix, refactor, docs, style, test, chore, build, ci
 - First line MUST be under 72 characters
 - Add a body separated by a blank line for complex changes
-- NEVER mention AI, Claude, or any AI tool in the commit message
+- NEVER mention AI, Claude, OpenCode, or any AI tool in the commit message
 - Focus on WHAT changed and WHY, not HOW
 
 After all commits are made, print a short summary listing each commit (hash and message).
@@ -255,8 +254,8 @@ PROMPT_EOF
   FULL_PROMPT="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
-  if ! run_claude "$FULL_PROMPT"; then
-    echo "ERROR: Smart commit failed — claude exited with a non-zero status." >&2
+  if ! run_opencode "$FULL_PROMPT"; then
+    echo "ERROR: Smart commit failed — opencode exited with a non-zero status." >&2
     echo "  See log: ${LOG_FILE}" >&2
     exit 1
   fi
@@ -303,7 +302,7 @@ Commit message rules:
 - Common types: feat, fix, refactor, docs, style, test, chore, build, ci
 - First line MUST be under 72 characters
 - Add a body separated by a blank line for complex changes
-- NEVER mention AI, Claude, or any AI tool in the commit message
+- NEVER mention AI, Claude, OpenCode, or any AI tool in the commit message
 - Focus on WHAT changed and WHY, not HOW
 - If additional context was provided by the user, factor it into the message
 
@@ -314,8 +313,8 @@ PROMPT_EOF
   FULL_PROMPT="${PROMPT_CONTEXT}
 ${PROMPT_BODY}"
 
-  if ! run_claude "$FULL_PROMPT"; then
-    echo "ERROR: Commit message generation failed — claude exited with a non-zero status." >&2
+  if ! run_opencode "$FULL_PROMPT"; then
+    echo "ERROR: Commit message generation failed — opencode exited with a non-zero status." >&2
     echo "  See log: ${LOG_FILE}" >&2
     exit 1
   fi
