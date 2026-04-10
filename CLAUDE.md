@@ -13,7 +13,7 @@ Scripts are organised into category folders: `claude/` for `cc` scripts and `ope
 
 ## Script Sync Policy
 
-Claude (`cc`) scripts are the **master**. Every non-draft Claude script MUST have a corresponding OpenCode (`oc`) equivalent in the `opencode/` directory. When creating or modifying a Claude script, always create or update the matching OpenCode script to stay in sync. The OpenCode version should be functionally identical, differing only in:
+Claude (`cc`) scripts are the **master**. Every non-draft Claude script MUST have a corresponding OpenCode (`oc`) equivalent in the `opencode/` directory. The two versions MUST be **functionally equivalent at all times** — same features, same options, same prompt text, same error handling, same output. When creating or modifying a Claude script, always create or update the matching OpenCode script to stay in sync. The OpenCode version MUST be identical except for:
 
 - Script name prefix (`cc` → `oc`)
 - Binary and variable names (`CLAUDE_CMD` → `OPENCODE_CMD`, `CLAUDE_MODEL` → `OPENCODE_MODEL`, `--claude-cmd` → `--opencode-cmd`)

@@ -172,7 +172,7 @@ run_opencode() {
   fi
 
   "$OPENCODE_CMD" "${cmd_args[@]}" ${model_args[@]+"${model_args[@]}"} --dangerously-skip-permissions \
-    < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
+    < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" | tee "$stdout_file" || exit_code=$?
 
   if [ -s "$stderr_file" ]; then
     echo "" >> "$LOG_FILE"

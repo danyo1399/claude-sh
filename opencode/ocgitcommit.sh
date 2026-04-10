@@ -138,7 +138,8 @@ esac
 
 # ── Working directory ────────────────────────────────────────────
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-WORK_DIR="${TMPDIR%/}/ocgitcommit-${RUN_ID}"
+WORK_DIR="${TMPDIR:-/tmp}"
+WORK_DIR="${WORK_DIR%/}/ocgitcommit-${RUN_ID}"
 mkdir -p "$WORK_DIR"
 
 cleanup() {
@@ -244,7 +245,7 @@ Commit message rules:
 - Common types: feat, fix, refactor, docs, style, test, chore, build, ci
 - First line MUST be under 72 characters
 - Add a body separated by a blank line for complex changes
-- NEVER mention AI, Claude, OpenCode, or any AI tool in the commit message
+- NEVER mention AI, Claude, or any AI tool in the commit message
 - Focus on WHAT changed and WHY, not HOW
 
 After all commits are made, print a short summary listing each commit (hash and message).
@@ -302,7 +303,7 @@ Commit message rules:
 - Common types: feat, fix, refactor, docs, style, test, chore, build, ci
 - First line MUST be under 72 characters
 - Add a body separated by a blank line for complex changes
-- NEVER mention AI, Claude, OpenCode, or any AI tool in the commit message
+- NEVER mention AI, Claude, or any AI tool in the commit message
 - Focus on WHAT changed and WHY, not HOW
 - If additional context was provided by the user, factor it into the message
 

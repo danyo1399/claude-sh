@@ -461,6 +461,11 @@ fi
 trap - EXIT
 echo "── Code Review Complete ─────────────────────────────────"
 echo "  Draft review   : ${DRAFT_FILE}"
+echo "  Final review   : ${REVIEW_OUTPUT}"
+if [ "$AUTO_FIX" = true ]; then
+  echo "  Auto-fix       : applied (see log for details)"
+  echo "  Log file       : ${LOG_FILE}"
+fi
 echo "────────────────────────────────────────────────────────"
 echo ""
 if command -v glow >/dev/null 2>&1; then
