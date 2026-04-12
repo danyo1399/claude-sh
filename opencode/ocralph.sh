@@ -214,16 +214,15 @@ RALPH_INSTRUCTIONS="
 IMPORTANT COMPLETION PROTOCOL:
 You MUST end every response with exactly one of the following markers:
 
-1. ${RALPH_DONE_MARKER}
-   Include this marker at the very end of your response when there is nothing
-   left to do. Use this whether you performed work in this iteration and
-   finished everything, or you examined the codebase and found nothing to do.
-   This signals that all work is complete.
+1. ${RALPH_LOOP_MARKER}
+   Include this marker at the very end of your response when you successfully
+   performed work in this iteration. A new iteration will start with a fresh
+   session so you can continue or verify.
 
-2. ${RALPH_LOOP_MARKER}
-   Include this marker at the very end of your response when you performed
-   work but there is more remaining. A new iteration will start with a fresh
-   session so you can continue.
+2. ${RALPH_DONE_MARKER}
+   Include this marker at the very end of your response when you examine the
+   codebase and determine there is nothing left to do. Only use this when you
+   are confident there is genuinely no remaining work.
 
 You MUST include exactly one of these two markers at the end of every response."
 
