@@ -112,20 +112,16 @@ if [ -z "$USER_PROMPT" ]; then
   exit 1
 fi
 
-# -- Git validation ──────────────────────────────────────────────
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-  echo "ERROR: must be run inside a git repository." >&2
-  exit 1
-}
+# -- Git detection (optional) ────────────────────────────────────
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT=""
+CURRENT_BRANCH=""
 
-CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || {
-  echo "ERROR: no commits on current branch." >&2
-  exit 1
-}
-
-if [ "$CURRENT_BRANCH" = "HEAD" ]; then
-  CURRENT_BRANCH="detached at $(git rev-parse --short HEAD)"
-  echo "WARNING: detached HEAD state. Using: ${CURRENT_BRANCH}" >&2
+if [ -n "$REPO_ROOT" ]; then
+  CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || CURRENT_BRANCH=""
+  if [ "$CURRENT_BRANCH" = "HEAD" ]; then
+    CURRENT_BRANCH="detached at $(git rev-parse --short HEAD)"
+    echo "WARNING: detached HEAD state. Using: ${CURRENT_BRANCH}" >&2
+  fi
 fi
 
 # -- Generate unique done suffix ─────────────────────────────────
@@ -190,8 +186,10 @@ run_claude() {
 RALPH_LOOP_MARKER="RALPH_LOOP_${RALPH_SUFFIX}"
 
 echo "── RALPH Pipeline ─────────────────────────────────────────"
-echo "  Repo root      : ${REPO_ROOT}"
-echo "  Current branch : ${CURRENT_BRANCH}"
+if [ -n "$REPO_ROOT" ]; then
+  echo "  Repo root      : ${REPO_ROOT}"
+  echo "  Current branch : ${CURRENT_BRANCH}"
+fi
 echo "  Max iterations : ${MAX_ITERATIONS}"
 echo "  Done marker    : ${RALPH_DONE_MARKER}"
 echo "  Loop marker    : ${RALPH_LOOP_MARKER}"
@@ -204,9 +202,12 @@ echo "────────────────────────�
 echo ""
 
 # -- Build prompt ────────────────────────────────────────────────
-PROMPT_CONTEXT="CONTEXT:
+PROMPT_CONTEXT="CONTEXT:"
+if [ -n "$REPO_ROOT" ]; then
+  PROMPT_CONTEXT="${PROMPT_CONTEXT}
 - Repository root: ${REPO_ROOT}
 - Current branch: ${CURRENT_BRANCH}"
+fi
 
 RALPH_INSTRUCTIONS="
 
