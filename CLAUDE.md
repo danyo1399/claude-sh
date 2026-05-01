@@ -1,26 +1,28 @@
 # claude-sh
 
-A collection of bash scripts that use the Claude CLI (`claude -p`) or OpenCode CLI (`opencode run`) to perform multi-step AI pipelines against git repositories.
+A collection of bash scripts that use the Claude CLI (`claude -p`), OpenCode CLI (`opencode run`), or Codex CLI (`codex exec`) to perform multi-step AI pipelines against git repositories.
 
 ## File Naming Conventions
 
 - Claude scripts are prefixed with `cc` (e.g., `cccodereview.sh`)
-- Open code scripts are prefixed with `oc` (e.g., `ocexample.sh`)
+- OpenCode scripts are prefixed with `oc` (e.g., `occodereview.sh`)
+- Codex scripts are prefixed with `cx` (e.g., `cxcodereview.sh`)
 
 ## Directory Structure
 
-Scripts are organised into category folders: `claude/` for `cc` scripts and `opencode/` for `oc` scripts. Each category folder contains a `draft/` subfolder for scripts that are not yet ready for production use. Draft scripts are excluded from installation.
+Scripts are organised into category folders: `claude/` for `cc` scripts, `opencode/` for `oc` scripts, and `codex/` for `cx` scripts. Each category folder contains a `draft/` subfolder for scripts that are not yet ready for production use. Draft scripts are excluded from installation.
 
 ## Script Sync Policy
 
-Claude (`cc`) scripts are the **master**. Every non-draft Claude script MUST have a corresponding OpenCode (`oc`) equivalent in the `opencode/` directory. The two versions MUST be **functionally equivalent at all times** — same features, same options, same prompt text, same error handling, same output. When creating or modifying a Claude script, always create or update the matching OpenCode script to stay in sync. The OpenCode version MUST be identical except for:
+Claude (`cc`) scripts are the **master**. Every non-draft Claude script MUST have a corresponding OpenCode (`oc`) equivalent in the `opencode/` directory AND a corresponding Codex (`cx`) equivalent in the `codex/` directory. All three versions MUST be **functionally equivalent at all times** — same features, same options, same prompt text, same error handling, same output. When creating or modifying a Claude script, always create or update the matching OpenCode and Codex scripts to stay in sync. The OpenCode and Codex versions MUST be identical to the Claude version except for:
 
-- Script name prefix (`cc` → `oc`)
-- Binary and variable names (`CLAUDE_CMD` → `OPENCODE_CMD`, `CLAUDE_MODEL` → `OPENCODE_MODEL`, `--claude-cmd` → `--opencode-cmd`)
-- Invocation method (`claude -p` → `opencode run`)
-- Helper function name (`run_claude` → `run_opencode`)
-- Log file name (`claude.log` → `opencode.log`)
-- Banner label (include "OpenCode" where appropriate)
+- Script name prefix (`cc` → `oc` / `cx`)
+- Binary and variable names (`CLAUDE_CMD` → `OPENCODE_CMD` / `CODEX_CMD`, `CLAUDE_MODEL` → `OPENCODE_MODEL` / `CODEX_MODEL`, `--claude-cmd` → `--opencode-cmd` / `--codex-cmd`)
+- Invocation method (`claude -p` → `opencode run` / `codex exec`)
+- Helper function name (`run_claude` → `run_opencode` / `run_codex`)
+- Log file name (`claude.log` → `opencode.log` / `codex.log`)
+- Banner label (include "OpenCode" or "Codex" where appropriate)
+- Permission/skip flags (`--dangerously-skip-permissions` for Claude/OpenCode; `--dangerously-bypass-approvals-and-sandbox` plus `--skip-git-repo-check` for Codex)
 
 ## Script Standards
 
@@ -88,7 +90,13 @@ For OpenCode (`oc`) scripts:
 - Support `--model` flag for CLI override where appropriate
 - Support `--opencode-cmd` flag for CLI override of the opencode binary
 
-Both:
+For Codex (`cx`) scripts:
+- `CODEX_CMD="${CODEX_CMD:-codex}"` — allow overriding the codex binary
+- `CODEX_MODEL="${CODEX_MODEL:-}"` — optional model override via env var
+- Support `--model` flag for CLI override where appropriate
+- Support `--codex-cmd` flag for CLI override of the codex binary
+
+All:
 - Parse CLI options with a `while/case` loop
 
 ### Git Repository Validation
@@ -245,6 +253,71 @@ run_opencode() {
 ```
 
 Refer to the Configuration section above for `oc` script variable and flag conventions.
+
+### Codex Invocation (cx scripts)
+
+Codex scripts use `codex exec` instead of `claude -p`.
+
+**CLI syntax:** `codex exec [OPTIONS] [PROMPT]`
+
+Key flags:
+- `--model, -m` — model the agent should use (e.g., `gpt-5-codex`, `o3`)
+- `--dangerously-bypass-approvals-and-sandbox` — skip all confirmation prompts and sandboxing
+- `--skip-git-repo-check` — allow running Codex outside a git repository (the script handles git validation itself)
+- `-i, --image` — image(s) to attach to the initial prompt
+- `-C, --cd` — directory to use as the agent's working root
+- `--add-dir` — additional writable directories
+- `--full-auto` — convenience alias for low-friction sandboxed automatic execution
+- `-s, --sandbox` — sandbox policy (`read-only`, `workspace-write`, `danger-full-access`)
+- `--json` — print events as JSONL
+- `-o, --output-last-message` — write the agent's last message to a file
+- `--color` — `always`, `never`, `auto`
+
+For session continuation: `codex exec resume [SESSION_ID] [PROMPT]` (use `--last` to pick the most recent session).
+
+Use a `run_codex` helper that mirrors `run_claude`:
+
+```bash
+LOG_FILE="${WORK_DIR}/codex.log"
+
+# run_codex PROMPT [STDOUT_FILE]
+#   Runs codex exec, tees stdout to LOG_FILE (and optional STDOUT_FILE),
+#   captures stderr, and reports diagnostics on failure.
+run_codex() {
+  local prompt="$1"
+  local stdout_file="${2:-}"
+  local exit_code=0
+  local stderr_file="${WORK_DIR}/codex-stderr.tmp"
+
+  local model_args=()
+  if [ -n "$CODEX_MODEL" ]; then
+    model_args=(--model "$CODEX_MODEL")
+  fi
+
+  if [ -n "$stdout_file" ]; then
+    $CODEX_CMD exec "$prompt" ${model_args[@]+"${model_args[@]}"} \
+      --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" > "$stdout_file" || exit_code=$?
+  else
+    $CODEX_CMD exec "$prompt" ${model_args[@]+"${model_args[@]}"} \
+      --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
+      < /dev/null 2>"$stderr_file" | tee -a "$LOG_FILE" || exit_code=$?
+  fi
+
+  if [ -s "$stderr_file" ]; then
+    echo "" >> "$LOG_FILE"
+    echo "── stderr ──" >> "$LOG_FILE"
+    cat "$stderr_file" >> "$LOG_FILE"
+    echo "  Codex stderr:" >&2
+    cat "$stderr_file" >&2
+  fi
+  rm -f "$stderr_file"
+
+  return "$exit_code"
+}
+```
+
+Refer to the Configuration section above for `cx` script variable and flag conventions.
 
 ### Prompt Structure
 
